@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Tuple, Union
 from urllib.parse import urlparse
+import soundfile as sf
 
 import fsspec
 import torch
@@ -288,3 +289,13 @@ def sort_checkpoints(output_path: str, checkpoint_prefix: str, use_mtime: bool =
     checkpoints_sorted = sorted(ordering_and_checkpoint_path)
     checkpoints_sorted = [checkpoint[1] for checkpoint in checkpoints_sorted]
     return checkpoints_sorted
+
+
+# JMa: Save audio files
+def save_audio(audios: dict, sample_rate: int, index: int, output_dir: str) -> None:
+    os.makedirs(output_dir, exist_ok=True)
+    print(f" | > Saving {len(audios)} test audio files at step {index}")
+    for name, wav in audios.items():
+        # Prefix audio filename with epochs done
+        output_path = f"{output_dir}/{index:07}_{name}.wav"
+        sf.write(output_path, wav, sample_rate)

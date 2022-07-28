@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+from cgi import test
 import importlib
 import logging
 import os
@@ -35,6 +36,7 @@ from trainer.io import (
     load_fsspec,
     save_best_model,
     save_checkpoint,
+    save_audio, # JMa
 )
 from trainer.logging import ConsoleLogger, DummyLogger, logger_factory
 from trainer.trainer_utils import (
@@ -139,6 +141,13 @@ class TrainerConfig(Coqpit):
         metadata={
             "help": "Run evalulation epoch after N steps. If None, waits until training epoch is completed. Defaults to None"
         },
+    )
+    # JMa
+    test_epoch_step: int = field(
+        default=1, metadata={"help": "Run test every test_epoch_step steps. Defaults to 1"}
+    )
+    save_test_files: bool = field(
+        default=False, metadata={"help": "Save test files. Defaults to False"}
     )
     # Fields for distributed training
     distributed_backend: str = field(
@@ -1455,6 +1464,10 @@ class Trainer:
                 )
             else:
                 self.model.test_log(test_outputs, self.dashboard_logger, self.training_assets, self.total_steps_done)
+        # JMa: Save test audio
+        if self.config.save_test_files and "audios" in test_outputs:
+            output_dir = f"{self.output_path}/test_audios"
+            save_audio(test_outputs["audios"], self.config.audio.sample_rate, self.total_steps_done, output_dir)
 
     def _restore_best_loss(self):
         """Restore the best loss from the args.best_path if provided else
@@ -1517,7 +1530,8 @@ class Trainer:
                 self.train_epoch()
             if self.config.run_eval:
                 self.eval_epoch()
-            if epoch >= self.config.test_delay_epochs and self.args.rank <= 0:
+            # JMa: Run test after `test_epoch_step` epochs
+            if epoch >= self.config.test_delay_epochs and self.args.rank <= 0 and epoch % self.config.test_epoch_step == 0:
                 self.test_run()
             self.c_logger.print_epoch_end(
                 epoch,
