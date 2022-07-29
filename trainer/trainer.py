@@ -1088,7 +1088,12 @@ class Trainer:
 
         # zero-out optimizer
         if step_optimizer:
-            optimizer.zero_grad(set_to_none=True)
+            # JMa: Received TypeError: `zero_grad(set_to_none=True)` got an unexpected keyword argument `set_to_none``
+            #      => calling `zero_grad()` without the `set_to_none` argument
+            try:
+                optimizer.zero_grad(set_to_none=True)
+            except TypeError:
+                optimizer.zero_grad()
         return outputs, loss_dict_detached, step_time
 
     def train_step(self, batch: Dict, batch_n_steps: int, step: int, loader_start_time: float) -> Tuple[Dict, Dict]:
