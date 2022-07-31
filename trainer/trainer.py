@@ -12,6 +12,9 @@ import traceback
 from dataclasses import dataclass, field
 from inspect import signature
 from typing import Callable, Dict, List, Tuple, Union
+from black import out
+
+from pyrsistent import T
 
 import torch
 import torch.distributed as dist
@@ -1470,9 +1473,18 @@ class Trainer:
             else:
                 self.model.test_log(test_outputs, self.dashboard_logger, self.training_assets, self.total_steps_done)
         # JMa: Save test audio
-        if self.config.save_test_files and "audios" in test_outputs:
+        if self.config.save_test_files:
+            # `test_run()` returns dict with "audios" item (e.g. VITS or Tacotron2)
+            if isinstance(test_outputs, dict) and "audios" in test_outputs:
+                audios = test_outputs["audios"]
+            # `test_run()` returns list with audios being the 2nd item (e.g. GlowTTS)
+            elif isinstance(test_outputs, (list, tuple)) and len(test_outputs) == 2:
+                audios = test_outputs[1]
+            else:
+                # `test_run()` doesn't return audios
+                raise RuntimeError("Test output doesn't contain audios.")
             output_dir = f"{self.output_path}/test_audios"
-            save_audio(test_outputs["audios"], self.config.audio.sample_rate, self.total_steps_done, output_dir)
+            save_audio(audios, self.config.audio.sample_rate, self.total_steps_done, output_dir)
 
     def _restore_best_loss(self):
         """Restore the best loss from the args.best_path if provided else
