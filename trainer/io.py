@@ -299,3 +299,13 @@ def save_audio(audios: dict, sample_rate: int, index: int, output_dir: str) -> N
         # Prefix audio filename with epochs done
         output_path = f"{output_dir}/{index:07}_{name}.wav"
         sf.write(output_path, wav, sample_rate)
+
+
+# JMa: Save audio files
+def save_figure(figures: dict, index: int, output_dir: str) -> None:
+    os.makedirs(output_dir, exist_ok=True)
+    print(f" | > Saving {len(figures)} test figures at step {index}")
+    for name, fig in figures.items():
+        # Prefix figure filename with epochs done
+        output_path = f"{output_dir}/{index:07}_{name}.png"
+        fig.plt.savefig(output_path)

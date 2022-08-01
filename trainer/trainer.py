@@ -37,6 +37,7 @@ from trainer.io import (
     save_best_model,
     save_checkpoint,
     save_audio, # JMa
+    save_figure, # JMa
 )
 from trainer.logging import ConsoleLogger, DummyLogger, logger_factory
 from trainer.trainer_utils import (
@@ -146,8 +147,13 @@ class TrainerConfig(Coqpit):
     test_epoch_step: int = field(
         default=1, metadata={"help": "Run test every test_epoch_step steps. Defaults to 1"}
     )
+    # JMa
     save_test_files: bool = field(
         default=False, metadata={"help": "Save test files. Defaults to False"}
+    )
+    # JMa
+    log_test_files: bool = field(
+        default=False, metadata={"help": "Log test files. Defaults to True"}
     )
     # Fields for distributed training
     distributed_backend: str = field(
@@ -1462,26 +1468,28 @@ class Trainer:
                 test_outputs = self.model.module.test(self.training_assets, self.test_loader, None)
             else:
                 test_outputs = self.model.test(self.training_assets, self.test_loader, None)
-        if hasattr(self.model, "test_log") or (self.num_gpus > 1 and hasattr(self.model.module, "test_log")):
+        # JMa: Log test files only when required
+        if self.config.log_test_files and (hasattr(self.model, "test_log") or (self.num_gpus > 1 and hasattr(self.model.module, "test_log"))):
             if self.num_gpus > 1:
                 self.model.module.test_log(
                     test_outputs, self.dashboard_logger, self.training_assets, self.total_steps_done
                 )
             else:
                 self.model.test_log(test_outputs, self.dashboard_logger, self.training_assets, self.total_steps_done)
-        # JMa: Save test audio
+        # JMa: Save test files
         if self.config.save_test_files:
-            # `test_run()` returns dict with "audios" item (e.g. VITS or Tacotron2)
-            if isinstance(test_outputs, dict) and "audios" in test_outputs:
+            # `test_run()` returns dict with "audios"/figures item (e.g. VITS or Tacotron2)
+            if isinstance(test_outputs, dict) and "audios" in test_outputs and "figures" in test_outputs:
                 audios = test_outputs["audios"]
-            # `test_run()` returns list with audios being the 2nd item (e.g. GlowTTS)
+                figures = test_outputs["figures"]
+            # `test_run()` returns list with the following items: figures, audios (e.g. GlowTTS)
             elif isinstance(test_outputs, (list, tuple)) and len(test_outputs) == 2:
-                audios = test_outputs[1]
+                figures, audios = test_outputs[0], test_outputs[1]
             else:
-                # `test_run()` doesn't return audios
-                raise RuntimeError("Test output doesn't contain audios.")
-            output_dir = f"{self.output_path}/test_audios"
-            save_audio(audios, self.config.audio.sample_rate, self.total_steps_done, output_dir)
+                # `test_run()` doesn't return audios/figures
+                raise RuntimeError("Test output doesn't contain audios and/or figures.")
+            save_audio(audios, self.config.audio.sample_rate, self.total_steps_done, f"{self.output_path}/test_audios")
+            save_figure(figures, self.total_steps_done, f"{self.output_path}/test_figures")
 
     def _restore_best_loss(self):
         """Restore the best loss from the args.best_path if provided else
