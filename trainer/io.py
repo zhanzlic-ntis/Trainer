@@ -308,4 +308,4 @@ def save_figure(figures: dict, index: int, output_dir: str) -> None:
     for name, fig in figures.items():
         # Prefix figure filename with epochs done
         output_path = f"{output_dir}/{index:07}_{name}.png"
-        fig.plt.savefig(output_path)
+        fig.savefig(output_path)
