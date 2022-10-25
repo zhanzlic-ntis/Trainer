@@ -287,6 +287,7 @@ class Trainer:
         test_samples: List = None,
         training_assets: Dict = {},
         parse_command_line_args: bool = True,
+        callbacks: Dict[str, Callable] = {},
         gpu: int = None,
     ) -> None:
         """Simple yet powerful 🐸💬 TTS trainer for PyTorch. It can train all the available `tts` and `vocoder` models
@@ -344,6 +345,9 @@ class Trainer:
             parse_command_line_args (bool):
                 If true, parse command-line arguments and update `TrainerArgs` and model `config` values. Set it
                 to false if you parse the arguments yourself. Defaults to True.
+
+            callbacks (Dict[str, Callable]):
+                A dictionary of callbacks to be used during training. The keys are the callback names and the values
 
             gpu (int):
                 GPU ID to use for training If "CUDA_VISIBLE_DEVICES" is not set. Defaults to None.
@@ -493,6 +497,7 @@ class Trainer:
 
         # CALLBACK
         self.callbacks = TrainerCallback()
+        self.callbacks.parse_callbacks_dict(callbacks)
         self.callbacks.on_init_start(self)
 
         # init AMP
