@@ -157,6 +157,14 @@ class TrainerConfig(Coqpit):
     log_test_files: bool = field(
         default=False, metadata={"help": "Log test files. Defaults to True"}
     )
+    # JMa
+    stop_after_steps: bool = field(
+        default=False, metadata={"help": "Stop training on epoch start when defined number of steps were reached. Defaults to False"}
+    )
+    # JMa
+    steps: int = field(
+        default=1000000, metadata={"help": "Number of steps to stop training when `stop_after_steps` is True. Defaults to 1000000"}
+    )
     # Fields for distributed training
     distributed_backend: str = field(
         default="nccl", metadata={"help": "Distributed backend to use. Defaults to 'nccl'"}
@@ -1373,7 +1381,7 @@ class Trainer:
         for cur_step, batch in enumerate(self.train_loader):
             outputs, _ = self.train_step(batch, batch_num_steps, cur_step, loader_start_time)
             if outputs is None:
-                logger.info(" [!] `train_step()` retuned `None` outputs. Skipping training step.")
+                logger.info(" [!] `train_step()` returned `None` outputs. Skipping training step.")
                 continue
             loader_start_time = time.time()
             # RUN EVAL -> run evaluation epoch in the middle of training. Useful for big datasets.
@@ -1636,6 +1644,26 @@ class Trainer:
         self.total_steps_done = self.restore_step
 
         for epoch in range(0, self.config.epochs):
+            # JMa: Stop training on epoch start when specified number of steps reached
+            if self.total_steps_done > self.config.steps:
+                logger.info(f" > {self.config.steps} global steps reached => training stopped at step {self.total_steps_done}")
+                # checkpoint the model
+                target_avg_loss = self._pick_target_avg_loss(self.keep_avg_train)
+                save_checkpoint(
+                    self.config,
+                    self.model,
+                    self.optimizer,
+                    self.scaler if self.use_amp_scaler else None,
+                    self.total_steps_done,
+                    self.epochs_done,
+                    self.output_path,
+                    model_loss=target_avg_loss,
+                    save_n_checkpoints=self.config.save_n_checkpoints,
+                    save_func=self.dashboard_logger.save_model,
+                )
+                # Stop training
+                return
+
             if self.num_gpus > 1:
                 # let all processes sync up before starting with a new epoch of training
                 dist.barrier()
