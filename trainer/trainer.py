@@ -1645,7 +1645,7 @@ class Trainer:
 
         for epoch in range(0, self.config.epochs):
             # JMa: Stop training on epoch start when specified number of steps reached
-            if self.total_steps_done > self.config.steps:
+            if self.config.stop_after_steps and self.total_steps_done > self.config.steps:
                 logger.info(f" > {self.config.steps} global steps reached => training stopped at step {self.total_steps_done}")
                 # checkpoint the model
                 target_avg_loss = self._pick_target_avg_loss(self.keep_avg_train)
