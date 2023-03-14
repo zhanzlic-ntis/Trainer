@@ -48,7 +48,7 @@ from trainer.trainer_utils import (
     setup_torch_training_env,
 )
 from trainer.utils.cuda_memory import cuda_meminfo, should_reduce_batch_size
-from trainer.utils.distributed import init_distributed
+from trainer.utils.distributed import init_distributed, rank_zero_only
 
 logger = logging.getLogger("trainer")
 
@@ -113,6 +113,9 @@ class TrainerConfig(Coqpit):
         default="tensorboard", metadata={"help": "Logger to use for the tracking dashboard. Defaults to 'tensorboard'"}
     )
     # Fields for checkpointing
+    save_on_interrupt: bool = field(
+        default=True, metadata={"help": "Save checkpoint on interrupt (Ctrl+C). Defaults to True"}
+    )
     log_model_step: int = field(
         default=None,
         metadata={
@@ -299,6 +302,8 @@ class Trainer:
         train_samples: List = None,
         eval_samples: List = None,
         test_samples: List = None,
+        train_loader: DataLoader = None,
+        eval_loader: DataLoader = None,
         training_assets: Dict = {},
         parse_command_line_args: bool = True,
         callbacks: Dict[str, Callable] = {},
@@ -347,6 +352,12 @@ class Trainer:
             eval_samples (List):
                 A list of evaluation samples used by the model's `get_eval_data_loader` to init the `dataset` and the
                 `data_loader`. Defaults to None.
+
+            train_loader (DataLoader):
+                A pytorch data loader object for training epochs. Leave as None if you want it to be made during training. Defaults to None.
+
+            eval_loader (DataLoader):
+                A pytorch data loader object for evaluation epochs. Leave as None to be generated during training. Defaults to None.
 
             test_samples (List):
                 A list of test samples used by the model's `get_test_data_loader` to init the `dataset` and the
@@ -468,6 +479,10 @@ class Trainer:
             self.train_samples = None
             self.eval_samples = None
             self.test_samples = None
+
+        # define custom train and eval loader
+        self.train_loader = train_loader
+        self.eval_loader = eval_loader
 
         # only use a subset of the samples if small_run is set
         self.setup_small_run(args.small_run)
@@ -725,6 +740,7 @@ class Trainer:
 
         logger.info(" > Restoring from %s ...", os.path.basename(restore_path))
         checkpoint = load_fsspec(restore_path, map_location="cpu")
+
         try:
             logger.info(" > Restoring Model...")
             model.load_state_dict(checkpoint["model"])
@@ -1310,47 +1326,11 @@ class Trainer:
             if self.total_steps_done % self.config.save_step == 0 and self.total_steps_done != 0:
                 if self.config.save_checkpoints:
                     # checkpoint the model
-                    target_avg_loss = self._pick_target_avg_loss(self.keep_avg_train)
-                    save_checkpoint(
-                        self.config,
-                        self.model,
-                        self.optimizer,
-                        self.scaler if self.use_amp_scaler else None,
-                        self.total_steps_done,
-                        self.epochs_done,
-                        self.output_path,
-                        model_loss=target_avg_loss,
-                        save_n_checkpoints=self.config.save_n_checkpoints,
-                        save_func=self.dashboard_logger.save_model,
-                    )
+                    self.save_checkpoint()
 
-                    if self.total_steps_done % self.config.log_model_step == 0:
-                        # log checkpoint as artifact
-                        aliases = [
-                            f"epoch-{self.epochs_done}",
-                            f"step-{self.total_steps_done}",
-                        ]
-                        self.dashboard_logger.add_artifact(
-                            file_or_dir=self.output_path, name="checkpoint", artifact_type="model", aliases=aliases
-                        )
-
-                # training visualizations
-                if hasattr(self.model, "module") and isimplemented(self.model.module, "train_log"):
-                    self.model.module.train_log(
-                        batch,
-                        outputs,
-                        self.dashboard_logger,
-                        self.training_assets,
-                        self.total_steps_done,
-                    )
-                elif isimplemented(self.model, "train_log"):
-                    self.model.train_log(
-                        batch,
-                        outputs,
-                        self.dashboard_logger,
-                        self.training_assets,
-                        self.total_steps_done,
-                    )
+            if self.total_steps_done % self.config.log_model_step == 0:
+                # log checkpoint as artifact
+                self.update_training_dashboard_logger(batch=batch, outputs=outputs)
 
             self.dashboard_logger.flush()
 
@@ -1361,11 +1341,12 @@ class Trainer:
     def train_epoch(self) -> None:
         """Main entry point for the training loop. Run training on the all training samples."""
         # initialize the data loader
-        self.train_loader = self.get_train_dataloader(
-            self.training_assets,
-            self.train_samples,
-            verbose=True,
-        )
+        if self.train_loader is None:
+            self.train_loader = self.get_train_dataloader(
+                self.training_assets,
+                self.train_samples,
+                verbose=True,
+            )
         # set model to training mode
         torch.set_grad_enabled(True)
         if self.num_gpus > 1:
@@ -1384,6 +1365,7 @@ class Trainer:
                 logger.info(" [!] `train_step()` returned `None` outputs. Skipping training step.")
                 continue
             loader_start_time = time.time()
+
             # RUN EVAL -> run evaluation epoch in the middle of training. Useful for big datasets.
             if self.config.run_eval_steps is not None and (self.total_steps_done % self.config.run_eval_steps == 0):
                 self.eval_epoch()
@@ -1391,6 +1373,8 @@ class Trainer:
                     self.model.module.train()
                 else:
                     self.model.train()
+                torch.set_grad_enabled(True)
+
         epoch_time = time.time() - epoch_start_time
         # scheduler step
         if self.scheduler is not None and self.config.scheduler_after_epoch:
@@ -1461,11 +1445,15 @@ class Trainer:
             loss_dict = {}
             if not isinstance(self.optimizer, list) or isimplemented(self.model, "optimize"):
                 outputs, loss_dict = self._model_eval_step(batch, self.model, self.criterion)
+                if outputs is None:
+                    return None, None
             else:
                 outputs = [None] * len(self.optimizer)
                 for idx, _ in enumerate(self.optimizer):
                     criterion = self.criterion
                     outputs_, loss_dict_new = self._model_eval_step(batch, self.model, criterion, idx)
+                    if outputs_ is None:
+                        return None, None
                     outputs[idx] = outputs_
 
                     if loss_dict_new:
@@ -1482,19 +1470,21 @@ class Trainer:
 
             if self.config.print_eval:
                 self.c_logger.print_eval_step(step, loss_dict, self.keep_avg_eval.avg_values)
+
         return outputs, loss_dict
 
     def eval_epoch(self) -> None:
         """Main entry point for the evaluation loop. Run evaluation on the all validation samples."""
-        self.eval_loader = (
-            self.get_eval_dataloader(
-                self.training_assets,
-                self.eval_samples,
-                verbose=True,
+        if self.eval_loader is None:
+            self.eval_loader = (
+                self.get_eval_dataloader(
+                    self.training_assets,
+                    self.eval_samples,
+                    verbose=True,
+                )
+                if self.config.run_eval
+                else None
             )
-            if self.config.run_eval
-            else None
-        )
 
         torch.set_grad_enabled(False)
         self.model.eval()
@@ -1508,12 +1498,12 @@ class Trainer:
             self.keep_avg_eval.update_values({"avg_loader_time": loader_time})
             outputs_, _ = self.eval_step(batch, cur_step)
             if outputs_ is None:
-                logger.info(" [!] `eval_step()` retuned `None` outputs. Skipping training step.")
+                logger.info(" [!] `eval_step()` retuned `None` outputs. Skipping evaluation step.")
                 continue
             outputs = outputs_
             loader_start_time = time.time()
         # plot epoch stats, artifacts and figures
-        if self.args.rank == 0:
+        if self.args.rank == 0 and outputs is not None:
             if hasattr(self.model, "module") and isimplemented(self.model.module, "eval_log"):
                 self.model.module.eval_log(
                     batch,
@@ -1676,6 +1666,7 @@ class Trainer:
                 self.train_epoch()
             if self.config.run_eval:
                 self.eval_epoch()
+                self.c_logger.print_epoch_end(self.epochs_done, self.keep_avg_eval.avg_values)
             # JMa: Run test after `test_epoch_step` epochs
             if epoch >= self.config.test_delay_epochs and self.args.rank <= 0 and epoch % self.config.test_epoch_step == 0:
                 self.test_run()
@@ -1725,6 +1716,14 @@ class Trainer:
             if self.args.rank == 0:
                 self.dashboard_logger.finish()
         except KeyboardInterrupt:
+            logger.info(" > Keyboard interrupt detected.")
+            if self.config.save_on_interrupt:
+                logger.info(" > Saving model before exiting...")
+                # save the model on keyboard interrupt
+                self.save_checkpoint()
+                # update the training dashboard logger
+                self.update_training_dashboard_logger()
+            # call the keyboard interrupt callback
             self.callbacks.on_keyboard_interrupt(self)
             # if the output folder is empty remove the run.
             remove_experiment_folder(self.output_path)
@@ -1736,9 +1735,9 @@ class Trainer:
                 self.dashboard_logger.finish()
             # stop without error signal
             try:
-                sys.exit(0)
+                sys.exit(1)
             except SystemExit:
-                os._exit(0)  # pylint: disable=protected-access
+                os._exit(1)  # pylint: disable=protected-access
         except BaseException:  # pylint: disable=broad-except
             remove_experiment_folder(self.output_path)
             traceback.print_exc()
@@ -1788,6 +1787,7 @@ class Trainer:
         self.torch_profiler.stop()
         return self.torch_profiler
 
+    @rank_zero_only
     def save_best_model(self) -> None:
         """Save the best model. It only saves if the current target loss is smaller then the previous."""
 
@@ -1809,6 +1809,52 @@ class Trainer:
             keep_after=self.config.save_best_after,
             save_func=self.dashboard_logger.save_model,
         )
+
+    @rank_zero_only
+    def save_checkpoint(self) -> None:
+        """Save the current model checkpoint."""
+        target_avg_loss = self._pick_target_avg_loss(self.keep_avg_train)
+        save_checkpoint(
+            self.config,
+            self.model,
+            self.optimizer,
+            self.scaler if self.use_amp_scaler else None,
+            self.total_steps_done,
+            self.epochs_done,
+            self.output_path,
+            model_loss=target_avg_loss,
+            save_n_checkpoints=self.config.save_n_checkpoints,
+            save_func=self.dashboard_logger.save_model,
+        )
+
+    @rank_zero_only
+    def update_training_dashboard_logger(self, batch=None, outputs=None):
+        aliases = [
+            f"epoch-{self.epochs_done}",
+            f"step-{self.total_steps_done}",
+        ]
+        self.dashboard_logger.add_artifact(
+            file_or_dir=self.output_path, name="checkpoint", artifact_type="model", aliases=aliases
+        )
+
+        # training visualizations
+        if batch is not None and outputs is not None:
+            if hasattr(self.model, "module") and isimplemented(self.model.module, "train_log"):
+                self.model.module.train_log(
+                    batch,
+                    outputs,
+                    self.dashboard_logger,
+                    self.training_assets,
+                    self.total_steps_done,
+                )
+            elif isimplemented(self.model, "train_log"):
+                self.model.train_log(
+                    batch,
+                    outputs,
+                    self.dashboard_logger,
+                    self.training_assets,
+                    self.total_steps_done,
+                )
 
     #####################
     # GET FUNCTIONS
@@ -1963,7 +2009,12 @@ class Trainer:
         if "target_loss" in self.config and self.config.target_loss:
             if f"avg_{self.config.target_loss}" in keep_avg_target.avg_values.keys():
                 return keep_avg_target[f"avg_{self.config.target_loss}"]
-            return keep_avg_target["avg_loss_1"]
+            target_loss = keep_avg_target["avg_loss_1"]
+            if target_loss is None:
+                raise ValueError(
+                    " [!] Target loss not found in the keep_avg_target. You might be exiting the training loop before it is computed or set the target_loss in the model config incorrectly."
+                )
+            return target_loss
 
         # take the average of loss_{optimizer_idx} as the target loss when there are multiple optimizers
         if isinstance(self.optimizer, list):
