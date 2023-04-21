@@ -1667,14 +1667,15 @@ class Trainer:
                 self.train_epoch()
             if self.config.run_eval:
                 self.eval_epoch()
-                self.c_logger.print_epoch_end(self.epochs_done, self.keep_avg_eval.avg_values)
-            # JMa: Run test after `test_epoch_step` epochs
-            if epoch >= self.config.test_delay_epochs and self.args.rank <= 0 and epoch % self.config.test_epoch_step == 0:
-                self.test_run()
+                # JMa: comment as eval performance is printed 2x (see below)
+                # self.c_logger.print_epoch_end(self.epochs_done, self.keep_avg_eval.avg_values)
             self.c_logger.print_epoch_end(
                 epoch,
                 self.keep_avg_eval.avg_values if self.config.run_eval else self.keep_avg_train.avg_values,
             )
+            # JMa: Run test after `test_epoch_step` epochs
+            if epoch >= self.config.test_delay_epochs and self.args.rank <= 0 and epoch % self.config.test_epoch_step == 0:
+                self.test_run()
             if self.args.rank in [None, 0]:
                 self.save_best_model()
             self.callbacks.on_epoch_end(self)
