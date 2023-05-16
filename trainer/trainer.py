@@ -37,6 +37,8 @@ from trainer.io import (
     load_fsspec,
     save_best_model,
     save_checkpoint,
+    save_audio, # JMa
+    save_figure, # JMa
 )
 from trainer.logging import ConsoleLogger, DummyLogger, logger_factory
 from trainer.trainer_utils import (
@@ -145,6 +147,26 @@ class TrainerConfig(Coqpit):
         metadata={
             "help": "Run evalulation epoch after N steps. If None, waits until training epoch is completed. Defaults to None"
         },
+    )
+    # JMa
+    test_epoch_step: int = field(
+        default=1, metadata={"help": "Run test every test_epoch_step steps. Defaults to 1"}
+    )
+    # JMa
+    save_test_files: bool = field(
+        default=False, metadata={"help": "Save test files. Defaults to False"}
+    )
+    # JMa
+    log_test_files: bool = field(
+        default=False, metadata={"help": "Log test files. Defaults to True"}
+    )
+    # JMa
+    stop_after_steps: bool = field(
+        default=False, metadata={"help": "Stop training on epoch start when defined number of steps were reached. Defaults to False"}
+    )
+    # JMa
+    steps: int = field(
+        default=1000000, metadata={"help": "Number of steps to stop training when `stop_after_steps` is True. Defaults to 1000000"}
     )
     # Fields for distributed training
     distributed_backend: str = field(
@@ -613,7 +635,8 @@ class Trainer:
             config (Coqpit): Config paramaters.
         """
         # set arguments for continuing training
-        if args.continue_path:
+        # ZHa: only if this path exists (for a simple creation of sequential jobs on metacentrum)
+        if args.continue_path and os.path.exists(args.continue_path):
             args.config_path = os.path.join(args.continue_path, "config.json")
             args.restore_path, best_model = get_last_checkpoint(args.continue_path)
             if not args.best_path:
@@ -1142,7 +1165,12 @@ class Trainer:
 
         # zero-out optimizer
         if step_optimizer:
-            optimizer.zero_grad(set_to_none=True)
+            # JMa: Received TypeError: `zero_grad(set_to_none=True)` got an unexpected keyword argument `set_to_none``
+            #      => calling `zero_grad()` without the `set_to_none` argument
+            try:
+                optimizer.zero_grad(set_to_none=True)
+            except TypeError:
+                optimizer.zero_grad()
         return outputs, loss_dict_detached, step_time
 
     def train_step(self, batch: Dict, batch_n_steps: int, step: int, loader_start_time: float) -> Tuple[Dict, Dict]:
@@ -1335,7 +1363,7 @@ class Trainer:
         for cur_step, batch in enumerate(self.train_loader):
             outputs, _ = self.train_step(batch, batch_num_steps, cur_step, loader_start_time)
             if outputs is None:
-                logger.info(" [!] `train_step()` retuned `None` outputs. Skipping training step.")
+                logger.info(" [!] `train_step()` returned `None` outputs. Skipping training step.")
                 continue
             del outputs
             loader_start_time = time.time()
@@ -1532,8 +1560,11 @@ class Trainer:
                 test_outputs = self.model.module.test(self.training_assets, self.test_loader, None)
             else:
                 test_outputs = self.model.test(self.training_assets, self.test_loader, None)
-        if isimplemented(self.model, "test_log") or (
-            self.num_gpus > 1 and isimplemented(self.model.module, "test_log")
+        # JMa: Log test files only when required
+        if self.config.log_test_files and (
+            isimplemented(self.model, "test_log") or (
+                self.num_gpus > 1 and isimplemented(self.model.module, "test_log")
+                )
         ):
             if self.num_gpus > 1:
                 self.model.module.test_log(
@@ -1541,6 +1572,20 @@ class Trainer:
                 )
             else:
                 self.model.test_log(test_outputs, self.dashboard_logger, self.training_assets, self.total_steps_done)
+        # JMa: Save test files
+        if self.config.save_test_files:
+            # `test_run()` returns dict with "audios"/figures item (e.g. VITS or Tacotron2)
+            if isinstance(test_outputs, dict) and "audios" in test_outputs and "figures" in test_outputs:
+                audios = test_outputs["audios"]
+                figures = test_outputs["figures"]
+            # `test_run()` returns list with the following items: figures, audios (e.g. GlowTTS)
+            elif isinstance(test_outputs, (list, tuple)) and len(test_outputs) == 2:
+                figures, audios = test_outputs[0], test_outputs[1]
+            else:
+                # `test_run()` doesn't return audios/figures
+                raise RuntimeError("Test output doesn't contain audios and/or figures.")
+            save_audio(audios, self.config.audio.sample_rate, self.total_steps_done, f"{self.output_path}/test_audios")
+            save_figure(figures, self.total_steps_done, f"{self.output_path}/test_figures")
 
     def _restore_best_loss(self):
         """Restore the best loss from the args.best_path if provided else
@@ -1591,6 +1636,26 @@ class Trainer:
         self.total_steps_done = self.restore_step
 
         for epoch in range(0, self.config.epochs):
+            # JMa: Stop training on epoch start when specified number of steps reached
+            if self.config.stop_after_steps and self.total_steps_done > self.config.steps:
+                logger.info(f" > {self.config.steps} global steps reached => training stopped at step {self.total_steps_done}")
+                # checkpoint the model
+                target_avg_loss = self._pick_target_avg_loss(self.keep_avg_train)
+                save_checkpoint(
+                    self.config,
+                    self.model,
+                    self.optimizer,
+                    self.scaler if self.use_amp_scaler else None,
+                    self.total_steps_done,
+                    self.epochs_done,
+                    self.output_path,
+                    model_loss=target_avg_loss,
+                    save_n_checkpoints=self.config.save_n_checkpoints,
+                    save_func=self.dashboard_logger.save_model,
+                )
+                # Stop training
+                return
+
             if self.num_gpus > 1:
                 # let all processes sync up before starting with a new epoch of training
                 dist.barrier()
@@ -1604,7 +1669,8 @@ class Trainer:
             if self.config.run_eval:
                 self.eval_epoch()
                 self.c_logger.print_epoch_end(self.epochs_done, self.keep_avg_eval.avg_values)
-            if epoch >= self.config.test_delay_epochs and self.args.rank <= 0:
+            # JMa: Run test after `test_epoch_step` epochs
+            if epoch >= self.config.test_delay_epochs and self.args.rank <= 0 and epoch % self.config.test_epoch_step == 0:
                 self.test_run()
             self.c_logger.print_epoch_end(
                 epoch,
