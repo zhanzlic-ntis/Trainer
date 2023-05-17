@@ -635,18 +635,20 @@ class Trainer:
             config (Coqpit): Config paramaters.
         """
         # set arguments for continuing training
-        # ZHa: only if this path exists (for a simple creation of sequential jobs on metacentrum)
-        if args.continue_path and os.path.exists(args.continue_path):
-            args.config_path = os.path.join(args.continue_path, "config.json")
-            args.restore_path, best_model = get_last_checkpoint(args.continue_path)
-            if not args.best_path:
-                args.best_path = best_model
-            # use the same config
-            if config:
-                config.load_json(args.config_path)
-            else:
-                coqpit = Coqpit()
-                coqpit.load_json(args.config_path)
+        if args.continue_path:
+            try:
+                args.config_path = os.path.join(args.continue_path, "config.json")
+                args.restore_path, best_model = get_last_checkpoint(args.continue_path)
+                if not args.best_path:
+                    args.best_path = best_model
+                # use the same config
+                if config:
+                    config.load_json(args.config_path)
+                else:
+                    coqpit = Coqpit()
+                    coqpit.load_json(args.config_path)
+            except:
+                logger.info(f"[!] Cannot restore previous model from \"{args.continue_path}\"")
 
         # override config values from command-line args
         # TODO: Maybe it is better to do it outside
