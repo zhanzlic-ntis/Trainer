@@ -412,8 +412,8 @@ class Trainer:
         else:
             # override the output path if it is provided
             output_path = config.output_path if output_path is None else output_path
-            # create a new output folder name
-            output_path = get_experiment_folder_path(config.output_path, config.run_name)
+            # create a new output folder name, ZHa: use the given output folder
+            # output_path = get_experiment_folder_path(config.output_path, config.run_name)
             os.makedirs(output_path, exist_ok=True)
 
         # copy training assets to the output folder
