@@ -1636,8 +1636,9 @@ class Trainer:
         self._restore_best_loss()
 
         self.total_steps_done = self.restore_step
+        self.epochs_done = self.restore_epoch
 
-        for epoch in range(0, self.config.epochs):
+        for epoch in range(self.restore_epoch, self.config.epochs):  #  ZHa: continue from the previous epoch number
             # JMa: Stop training on epoch start when specified number of steps reached
             if self.config.stop_after_steps and self.total_steps_done > self.config.steps:
                 logger.info(f" > {self.config.steps} global steps reached => training stopped at step {self.total_steps_done}")
