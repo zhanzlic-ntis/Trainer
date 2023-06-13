@@ -168,6 +168,10 @@ class TrainerConfig(Coqpit):
     steps: int = field(
         default=1000000, metadata={"help": "Number of steps to stop training when `stop_after_steps` is True. Defaults to 1000000"}
     )
+    # JMa
+    use_total_epochs: bool = field(
+        default=False, metadata={"help": "Compute the number of epochs done as a total number across continue runs. Defaults to False"}
+    )
     # Fields for distributed training
     distributed_backend: str = field(
         default="nccl", metadata={"help": "Distributed backend to use. Defaults to 'nccl'"}
@@ -771,7 +775,9 @@ class Trainer:
 
         optimizer = self.restore_lr(config, self.args, model, optimizer)
 
-        logger.info(" > Model restored from step %i", checkpoint["step"])
+        # JMa: add epoch to logging
+        logger.info(f" > Model restored from step {checkpoint['step']} (epoch {checkpoint['epoch']})")
+        # logger.info(" > Model restored from step %i", checkpoint["step"])
         restore_step = checkpoint["step"] + 1  # +1 not to immediately checkpoint if the model is restored
         restore_epoch = checkpoint["epoch"]
         torch.cuda.empty_cache()
@@ -1651,24 +1657,25 @@ class Trainer:
 
         self.total_steps_done = self.restore_step
 
-        for epoch in range(0, self.config.epochs):
+        # JMa: Set starting epoch number
+        if self.config.use_total_epochs:
+            # Use total epochs for "continue mode"; reset epochs for "restore mode"
+            start_epoch = self.restore_epoch if self.args.continue_path else 0
+        else:
+            # Always start from 0 when not using total (global) epochs (default in Coqui)
+            start_epoch = 0
+        # JMa: Check if the desired number of epochs was already reached
+        if start_epoch >= self.config.epochs:
+            logger.info(f" > The desired epochs {self.config.epochs} already reached at step {self.total_steps_done} => skipping")
+            return
+        
+        # Loop over the defined number of epochs
+        for epoch in range(start_epoch, self.config.epochs):
             # JMa: Stop training on epoch start when specified number of steps reached
             if self.config.stop_after_steps and self.total_steps_done > self.config.steps:
                 logger.info(f" > {self.config.steps} global steps reached => training stopped at step {self.total_steps_done}")
                 # checkpoint the model
-                target_avg_loss = self._pick_target_avg_loss(self.keep_avg_train)
-                save_checkpoint(
-                    self.config,
-                    self.model,
-                    self.optimizer,
-                    self.scaler if self.use_amp_scaler else None,
-                    self.total_steps_done,
-                    self.epochs_done,
-                    self.output_path,
-                    model_loss=target_avg_loss,
-                    save_n_checkpoints=self.config.save_n_checkpoints,
-                    save_func=self.dashboard_logger.save_model,
-                )
+                self.save_checkpoint()
                 # Stop training
                 return
 
@@ -1678,7 +1685,9 @@ class Trainer:
             self.callbacks.on_epoch_start(self)
             self.keep_avg_train = KeepAverage()
             self.keep_avg_eval = KeepAverage() if self.config.run_eval else None
-            self.epochs_done = epoch
+            # JMa: Compute total number of epochs if specified in config
+            self.epochs_done = self.epochs_done + 1 if self.config.use_total_epochs else epoch
+            # self.epochs_done = epoch
             self.c_logger.print_epoch_start(epoch, self.config.epochs, self.output_path)
             if not self.skip_train_epoch and not self.start_with_eval:
                 self.train_epoch()
@@ -1697,6 +1706,10 @@ class Trainer:
                 self.save_best_model()
             self.callbacks.on_epoch_end(self)
             self.start_with_eval = False
+
+        # JMa: Checkpoint model after all epochs done
+        logger.info(f" > {self.config.epochs} epochs reached at step {self.total_steps_done} => saving the final checkpoint")
+        self.save_checkpoint()
 
     def fit_with_largest_batch_size(self, starting_batch_size=2048) -> None:
         cuda_meminfo()
