@@ -122,8 +122,19 @@ class TrainerConfig(Coqpit):
             "help": "Save checkpoint to the logger every log_model_step steps. If not defined `save_step == log_model_step`."
         },
     )
+    # JMa
+    log_model_epoch: int = field(
+        default=None,
+        metadata={
+            "help": "Save checkpoint to the logger every log_model_epoch epochs. If not defined `save_epoch == log_model_epoch`."
+        },
+    )
     save_step: int = field(
         default=10000, metadata={"help": "Save local checkpoint every save_step steps. Defaults to 10000"}
+    )
+    # JMa
+    save_epoch: int = field(
+        default=25, metadata={"help": "Save local checkpoint every save_epoch epochs. Defaults to 25"}
     )
     save_n_checkpoints: int = field(default=5, metadata={"help": "Keep n local checkpoints. Defaults to 5"})
     save_checkpoints: bool = field(default=True, metadata={"help": "Save checkpoints locally. Defaults to True"})
@@ -456,6 +467,9 @@ class Trainer:
 
         if not self.config.log_model_step:
             self.config.log_model_step = self.config.save_step
+        # JMa: Use `log_model_epoch` when total epochs are used
+        if not self.config.log_model_epoch:
+            self.config.log_model_epoch = self.config.save_epoch
 
         self.total_steps_done = 0
         self.epochs_done = 0
@@ -1346,14 +1360,27 @@ class Trainer:
             # reduce TB load and don't log every step
             if self.total_steps_done % self.config.plot_step == 0:
                 self.dashboard_logger.train_step_stats(self.total_steps_done, loss_dict)
-            if self.total_steps_done % self.config.save_step == 0 and self.total_steps_done != 0:
+            # JMa: Use epochs or steps to checkpoint the model
+            if self.config.use_total_epochs:
+                iters_done, save_iter, log_model_iter = self.epochs_done, self.config.save_epoch, self.config.log_model_epoch
+            else:
+                iters_done, save_iter, log_model_iter = self.total_steps_done, self.config.save_step, self.config.log_model_step
+            if iters_done % save_iter == 0 and iters_done != 0:
                 if self.config.save_checkpoints:
                     # checkpoint the model
                     self.save_checkpoint()
+            # if self.total_steps_done % self.config.save_step == 0 and self.total_steps_done != 0:
+            #     if self.config.save_checkpoints:
+            #         # checkpoint the model
+            #         self.save_checkpoint()
 
-            if self.total_steps_done % self.config.log_model_step == 0:
+            # JMa: Use epochs or steps to log the model
+            if iters_done % log_model_iter == 0:
                 # log checkpoint as artifact
                 self.update_training_dashboard_logger(batch=batch, outputs=outputs)
+            # if self.total_steps_done % self.config.log_model_step == 0:
+            #     # log checkpoint as artifact
+            #     self.update_training_dashboard_logger(batch=batch, outputs=outputs)
 
             self.dashboard_logger.flush()
 
@@ -1841,7 +1868,7 @@ class Trainer:
             keep_after=self.config.save_best_after,
             save_func=self.dashboard_logger.save_model,
             # JMa: add epoch to path if total epochs are used
-            add_epoch_to_path=self.config.use_total_epochs,
+            use_epochs_in_path=self.config.use_total_epochs,
         )
 
     @rank_zero_only
@@ -1860,7 +1887,7 @@ class Trainer:
             save_n_checkpoints=self.config.save_n_checkpoints,
             save_func=self.dashboard_logger.save_model,
             # JMa: add epoch to path if total epochs are used
-            add_epoch_to_path=self.config.use_total_epochs,
+            use_epochs_in_path=self.config.use_total_epochs,
         )
 
     @rank_zero_only
