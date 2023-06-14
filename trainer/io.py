@@ -147,7 +147,8 @@ def save_checkpoint(
     save_func=None,
     **kwargs,
 ):
-    file_name = f"checkpoint_{current_step}.pth"
+    # JMa: add epoch to path if required
+    file_name = f"checkpoint_{epoch}_{current_step}.pth" if kwargs.get("add_epoch_to_path", False) else f"checkpoint_{current_step}.pth"
     checkpoint_path = os.path.join(output_folder, file_name)
 
     logger.info("\n > CHECKPOINT : %s", checkpoint_path)
@@ -182,7 +183,8 @@ def save_best_model(
     **kwargs,
 ):
     if current_loss < best_loss:
-        best_model_name = f"best_model_{current_step}.pth"
+        # JMa: add epoch to path if required
+        best_model_name = f"best_model_{epoch}_{current_step}.pth" if kwargs.get("add_epoch_to_path", False) else f"best_model_{current_step}.pth"
         checkpoint_path = os.path.join(out_path, best_model_name)
         logger.info(" > BEST MODEL : %s", checkpoint_path)
         save_model(

@@ -1840,6 +1840,8 @@ class Trainer:
             keep_all_best=self.config.save_all_best,
             keep_after=self.config.save_best_after,
             save_func=self.dashboard_logger.save_model,
+            # JMa: add epoch to path if total epochs are used
+            add_epoch_to_path=self.config.use_total_epochs,
         )
 
     @rank_zero_only
@@ -1857,6 +1859,8 @@ class Trainer:
             model_loss=target_avg_loss,
             save_n_checkpoints=self.config.save_n_checkpoints,
             save_func=self.dashboard_logger.save_model,
+            # JMa: add epoch to path if total epochs are used
+            add_epoch_to_path=self.config.use_total_epochs,
         )
 
     @rank_zero_only
