@@ -573,6 +573,9 @@ class Trainer:
                 self.config, args.restore_path, self.model, self.optimizer, self.scaler
             )
             self.scaler = torch.cuda.amp.GradScaler()
+            # JMa: update epochs done to be total number of epochs done
+            if self.config.use_total_epochs:
+                self.epochs_done = self.restore_epoch
 
         # setup scheduler
         self.scheduler = self.get_scheduler(self.model, self.config, self.optimizer)
@@ -793,7 +796,7 @@ class Trainer:
         logger.info(f" > Model restored from step {checkpoint['step']} (epoch {checkpoint['epoch']})")
         # logger.info(" > Model restored from step %i", checkpoint["step"])
         restore_step = checkpoint["step"] + 1  # +1 not to immediately checkpoint if the model is restored
-        restore_epoch = checkpoint["epoch"]
+        restore_epoch = checkpoint["epoch"] + 1
         torch.cuda.empty_cache()
         return model, optimizer, scaler, restore_step, restore_epoch
 
@@ -1360,27 +1363,17 @@ class Trainer:
             # reduce TB load and don't log every step
             if self.total_steps_done % self.config.plot_step == 0:
                 self.dashboard_logger.train_step_stats(self.total_steps_done, loss_dict)
-            # JMa: Use epochs or steps to checkpoint the model
-            if self.config.use_total_epochs:
-                iters_done, save_iter, log_model_iter = self.epochs_done, self.config.save_epoch, self.config.log_model_epoch
-            else:
-                iters_done, save_iter, log_model_iter = self.total_steps_done, self.config.save_step, self.config.log_model_step
-            if iters_done % save_iter == 0 and iters_done != 0:
-                if self.config.save_checkpoints:
-                    # checkpoint the model
-                    self.save_checkpoint()
-            # if self.total_steps_done % self.config.save_step == 0 and self.total_steps_done != 0:
-            #     if self.config.save_checkpoints:
-            #         # checkpoint the model
-            #         self.save_checkpoint()
+            # JMa: checkpoint the model if step-based checkpointing is chosen
+            if not self.config.use_total_epochs:
+                if self.total_steps_done % self.config.save_step == 0 and self.total_steps_done != 0:
+                    if self.config.save_checkpoints:
+                        # checkpoint the model
+                        self.save_checkpoint()
 
-            # JMa: Use epochs or steps to log the model
-            if iters_done % log_model_iter == 0:
-                # log checkpoint as artifact
-                self.update_training_dashboard_logger(batch=batch, outputs=outputs)
-            # if self.total_steps_done % self.config.log_model_step == 0:
-            #     # log checkpoint as artifact
-            #     self.update_training_dashboard_logger(batch=batch, outputs=outputs)
+                # JMa: log the model
+                if self.total_steps_done % self.config.save_step == 0:
+                    # log checkpoint as artifact
+                    self.update_training_dashboard_logger(batch=batch, outputs=outputs)
 
             self.dashboard_logger.flush()
 
@@ -1414,7 +1407,10 @@ class Trainer:
             if outputs is None:
                 logger.info(" [!] `train_step()` returned `None` outputs. Skipping training step.")
                 continue
-            del outputs
+            # JMa: Do NOT delete the last outputs since it is used to update training dashboard logger after defined epochs are reached
+            if cur_step < batch_num_steps-1:
+                del outputs
+            
             loader_start_time = time.time()
 
             # RUN EVAL -> run evaluation epoch in the middle of training. Useful for big datasets.
@@ -1446,6 +1442,20 @@ class Trainer:
             self.dashboard_logger.train_epoch_stats(self.total_steps_done, epoch_stats)
             if self.config.model_param_stats:
                 self.dashboard_logger.model_weights(self.model, self.total_steps_done)
+            # JMa: checkpoint the model if epoch-based checkpointing is chosen
+            if self.config.use_total_epochs:
+                if self.epochs_done % self.config.save_epoch == 0 and self.epochs_done != 0:
+                    if self.config.save_checkpoints:
+                        # checkpoint the model
+                        self.save_checkpoint()
+                
+                # JMa: log the model
+                if self.epochs_done % self.config.save_epoch == 0:
+                    # log checkpoint as artifact
+                    self.update_training_dashboard_logger(batch=batch, outputs=outputs)
+        # JMa: Delete outputs at the end of epoch
+        del outputs
+
         torch.cuda.empty_cache()
 
     #######################
@@ -1633,8 +1643,9 @@ class Trainer:
             else:
                 # `test_run()` doesn't return audios/figures
                 raise RuntimeError("Test output doesn't contain audios and/or figures.")
-            save_audio(audios, self.config.audio.sample_rate, self.total_steps_done, f"{self.output_path}/test_audios")
-            save_figure(figures, self.total_steps_done, f"{self.output_path}/test_figures")
+            save_index = self.epochs_done if self.config.use_total_epochs else self.total_steps_done
+            save_audio(audios, self.config.audio.sample_rate, save_index, f"{self.output_path}/test_audios")
+            save_figure(figures, save_index, f"{self.output_path}/test_figures")
 
     def _restore_best_loss(self):
         """Restore the best loss from the args.best_path if provided else
@@ -1686,7 +1697,7 @@ class Trainer:
 
         # JMa: Set starting epoch number
         if self.config.use_total_epochs:
-            # Use total epochs for "continue mode"; reset epochs for "restore mode"
+            # Use total epochs for "continue mode"; reset epochs for "restore mode" or starting from scratch
             start_epoch = self.restore_epoch if self.args.continue_path else 0
         else:
             # Always start from 0 when not using total (global) epochs (default in Coqui)
@@ -1695,7 +1706,7 @@ class Trainer:
         if start_epoch >= self.config.epochs:
             logger.info(f" > The desired epochs {self.config.epochs} already reached at step {self.total_steps_done} => skipping")
             return
-        
+
         # Loop over the defined number of epochs
         for epoch in range(start_epoch, self.config.epochs):
             # JMa: Stop training on epoch start when specified number of steps reached
@@ -1712,9 +1723,7 @@ class Trainer:
             self.callbacks.on_epoch_start(self)
             self.keep_avg_train = KeepAverage()
             self.keep_avg_eval = KeepAverage() if self.config.run_eval else None
-            # JMa: Compute total number of epochs if specified in config
-            self.epochs_done = self.epochs_done + 1 if self.config.use_total_epochs else epoch
-            # self.epochs_done = epoch
+            self.epochs_done = epoch
             self.c_logger.print_epoch_start(epoch, self.config.epochs, self.output_path)
             if not self.skip_train_epoch and not self.start_with_eval:
                 self.train_epoch()
@@ -1727,7 +1736,7 @@ class Trainer:
                 self.keep_avg_eval.avg_values if self.config.run_eval else self.keep_avg_train.avg_values,
             )
             # JMa: Run test after `test_epoch_step` epochs
-            if epoch >= self.config.test_delay_epochs and self.args.rank <= 0 and epoch % self.config.test_epoch_step == 0:
+            if self.epochs_done >= self.config.test_delay_epochs and self.args.rank <= 0 and self.epochs_done % self.config.test_epoch_step == 0:
                 self.test_run()
             if self.args.rank in [None, 0]:
                 self.save_best_model()

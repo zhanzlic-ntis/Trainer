@@ -321,18 +321,18 @@ def sort_checkpoints(output_path: str, checkpoint_prefix: str, use_mtime: bool =
 # JMa: Save audio files
 def save_audio(audios: dict, sample_rate: int, index: int, output_dir: str) -> None:
     os.makedirs(output_dir, exist_ok=True)
-    print(f" | > Saving {len(audios)} test audio files at step {index}")
+    print(f" | > Saving {len(audios)} test audio files at step/epoch {index}")
     for name, wav in audios.items():
-        # Prefix audio filename with epochs done
+        # Prefix audio filename with steps/epochs done
         output_path = f"{output_dir}/{index:07}_{name}.wav"
         sf.write(output_path, wav, sample_rate)
 
 
-# JMa: Save audio files
+# JMa: Save figure files
 def save_figure(figures: dict, index: int, output_dir: str) -> None:
     os.makedirs(output_dir, exist_ok=True)
-    print(f" | > Saving {len(figures)} test figures at step {index}")
+    print(f" | > Saving {len(figures)} test figures at step/epoch {index}")
     for name, fig in figures.items():
-        # Prefix figure filename with epochs done
+        # Prefix figure filename with steps/epochs done
         output_path = f"{output_dir}/{index:07}_{name}.png"
         fig.savefig(output_path)
