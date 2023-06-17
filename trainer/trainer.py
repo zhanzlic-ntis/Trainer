@@ -573,9 +573,6 @@ class Trainer:
                 self.config, args.restore_path, self.model, self.optimizer, self.scaler
             )
             self.scaler = torch.cuda.amp.GradScaler()
-            # JMa: update epochs done to be total number of epochs done
-            if self.config.use_total_epochs:
-                self.epochs_done = self.restore_epoch
 
         # setup scheduler
         self.scheduler = self.get_scheduler(self.model, self.config, self.optimizer)
