@@ -1654,6 +1654,7 @@ class Trainer:
         self.c_logger.print_eval_start()
         loader_start_time = time.time()
         batch = None
+        outputs = None
         for cur_step, batch in enumerate(self.eval_loader):
             # format data
             batch = self.format_batch(batch)
