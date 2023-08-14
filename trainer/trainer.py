@@ -328,6 +328,7 @@ class Trainer:
         parse_command_line_args: bool = True,
         callbacks: Dict[str, Callable] = {},
         gpu: int = None,
+        mk_experiment_folder: bool = True,
     ) -> None:
         """Simple yet powerful 🐸💬 TTS trainer for PyTorch. It can train all the available `tts` and `vocoder` models
         or easily be customized.
@@ -397,6 +398,9 @@ class Trainer:
             gpu (int):
                 GPU ID to use for training If "CUDA_VISIBLE_DEVICES" is not set. Defaults to None.
 
+            mk_experiment_folder (bool):
+                Create an experiment subfolder with a unique name (run-name and time-based). Defaults to True.
+
         Example::
 
             Running trainer with a model.
@@ -432,8 +436,11 @@ class Trainer:
         else:
             # override the output path if it is provided
             output_path = config.output_path if output_path is None else output_path
-            # create a new output folder name, ZHa: use the given output folder
-            # output_path = get_experiment_folder_path(config.output_path, config.run_name)
+            
+            # create a new unique output folder name (ZHa: when allowed by mk_experiment_folder)
+            if mk_experiment_folder:
+                output_path = get_experiment_folder_path(output_path, config.run_name)
+            
             os.makedirs(output_path, exist_ok=True)
 
         # copy training assets to the output folder
