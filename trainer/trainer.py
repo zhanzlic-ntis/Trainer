@@ -931,7 +931,6 @@ class Trainer:
         assert (
             len(loader) > 0
         ), " ❗ len(DataLoader) returns 0. Make sure your dataset is not empty or len(dataset) > 0. "
-
         return loader
 
     def get_train_dataloader(self, training_assets: Dict, samples: List, verbose: bool) -> DataLoader:
@@ -1845,6 +1844,7 @@ class Trainer:
             # JMa: Run test after `test_epoch_step` epochs
             if epoch >= self.config.test_delay_epochs and self.args.rank <= 0 and epoch % self.config.test_epoch_step == 0:
                 self.test_run()
+
             self.c_logger.print_epoch_end(
                 epoch,
                 self.keep_avg_eval.avg_values if self.config.run_eval else self.keep_avg_train.avg_values,
@@ -2184,7 +2184,6 @@ class Trainer:
     def _pick_target_avg_loss(self, keep_avg_target: KeepAverage) -> Dict:
         """Pick the target loss to compare models"""
         target_avg_loss = None
-
         # return if target loss defined in the model config
         # if not available in Dict use loss_1 as by default loss
         if "target_loss" in self.config and self.config.target_loss:
