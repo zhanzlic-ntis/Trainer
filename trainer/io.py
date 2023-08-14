@@ -18,7 +18,6 @@ from trainer.logger import logger
 def get_user_data_dir(appname):
     if sys.platform == "win32":
         import winreg  # pylint: disable=import-outside-toplevel, import-error
-        
         key = winreg.OpenKey(
             winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders"
         )
@@ -147,7 +146,8 @@ def save_checkpoint(
     save_func=None,
     **kwargs,
 ):
-    file_name = f"checkpoint_{current_step}.pth"
+    # JMa: use epoch in path instead of steps if required
+    file_name = f"checkpoint_{epoch}.pth" if kwargs.get("use_epochs_in_path", False) else f"checkpoint_{current_step}.pth"
     checkpoint_path = os.path.join(output_folder, file_name)
 
     logger.info("\n > CHECKPOINT : %s", checkpoint_path)
@@ -182,7 +182,8 @@ def save_best_model(
     **kwargs,
 ):
     if current_loss < best_loss:
-        best_model_name = f"best_model_{current_step}.pth"
+        # JMa: use epoch in path instead of steps if required
+        best_model_name = f"best_model_{epoch}.pth" if kwargs.get("use_epochs_in_path", False) else f"best_model_{current_step}.pth"
         checkpoint_path = os.path.join(out_path, best_model_name)
         logger.info(" > BEST MODEL : %s", checkpoint_path)
         save_model(
@@ -232,7 +233,7 @@ def get_last_checkpoint(path: str) -> Tuple[str, str]:
     file_names = fs.glob(os.path.join(path, "*.pth"))
     scheme = urlparse(path).scheme
     if scheme and path.startswith(scheme + "://"):
-        # scheme is not preserved in fs.glob, add it 
+        # scheme is not preserved in fs.glob, add it
         # back if it exists on the path
         file_names = [scheme + "://" + file_name for file_name in file_names]
     last_models = {}
@@ -319,18 +320,18 @@ def sort_checkpoints(output_path: str, checkpoint_prefix: str, use_mtime: bool =
 # JMa: Save audio files
 def save_audio(audios: dict, sample_rate: int, index: int, output_dir: str) -> None:
     os.makedirs(output_dir, exist_ok=True)
-    print(f" | > Saving {len(audios)} test audio files at step {index}")
+    print(f" | > Saving {len(audios)} test audio files at step/epoch {index}")
     for name, wav in audios.items():
-        # Prefix audio filename with epochs done
+        # Prefix audio filename with steps/epochs done
         output_path = f"{output_dir}/{index:07}_{name}.wav"
         sf.write(output_path, wav, sample_rate)
 
 
-# JMa: Save audio files
+# JMa: Save figure files
 def save_figure(figures: dict, index: int, output_dir: str) -> None:
     os.makedirs(output_dir, exist_ok=True)
-    print(f" | > Saving {len(figures)} test figures at step {index}")
+    print(f" | > Saving {len(figures)} test figures at step/epoch {index}")
     for name, fig in figures.items():
-        # Prefix figure filename with epochs done
+        # Prefix figure filename with steps/epochs done
         output_path = f"{output_dir}/{index:07}_{name}.png"
         fig.savefig(output_path)
