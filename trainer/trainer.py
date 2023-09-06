@@ -1692,6 +1692,11 @@ class Trainer:
                 else None
             )
 
+        # JMa: Handle no data in `self.eval_loader` (e.g. when only few eval samples are available)
+        outputs = None
+        if len(list(enumerate(self.eval_loader))) < 1:
+            logger.info(" [!] `eval_loader` is empty. Skipping evaluation step.")
+
         torch.set_grad_enabled(False)
         self.model.eval()
         self.c_logger.print_eval_start()
@@ -1704,7 +1709,7 @@ class Trainer:
             self.keep_avg_eval.update_values({"avg_loader_time": loader_time})
             outputs_, _ = self.eval_step(batch, cur_step)
             if outputs_ is None:
-                logger.info(" [!] `eval_step()` retuned `None` outputs. Skipping evaluation step.")
+                logger.info(" [!] `eval_step()` returned `None` outputs. Skipping evaluation step.")
                 continue
             outputs = outputs_
             loader_start_time = time.time()
