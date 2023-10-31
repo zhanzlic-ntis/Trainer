@@ -1694,8 +1694,6 @@ class Trainer:
                 else None
             )
 
-        # JMa: Handle no data in `self.eval_loader` (e.g. when only few eval samples are available)
-        outputs = None
         if len(list(enumerate(self.eval_loader))) < 1:
             logger.info(" [!] `eval_loader` is empty. Skipping evaluation step.")
 
@@ -1882,16 +1880,14 @@ class Trainer:
                 self.train_epoch()
             if self.config.run_eval:
                 self.eval_epoch()
-            if epoch >= self.config.test_delay_epochs and self.args.rank <= 0:
+            # JMa: Run test after `test_epoch_step` epochs
+            if self.epochs_done >= self.config.test_delay_epochs and self.args.rank <= 0 and self.epochs_done % self.config.test_epoch_step == 0:
                 self.test_run()
 
             self.c_logger.print_epoch_end(
                 epoch,
                 self.keep_avg_eval.avg_values if self.config.run_eval else self.keep_avg_train.avg_values,
             )
-            # JMa: Run test after `test_epoch_step` epochs
-            if self.epochs_done >= self.config.test_delay_epochs and self.args.rank <= 0 and self.epochs_done % self.config.test_epoch_step == 0:
-                self.test_run()
             if self.args.rank in [None, 0]:
                 self.save_best_model()
             self.callbacks.on_epoch_end(self)
