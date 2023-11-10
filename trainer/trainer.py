@@ -779,7 +779,13 @@ class Trainer:
         # TODO: Maybe it is better to do it outside
         if len(coqpit_overrides) > 0:
             config.parse_known_args(coqpit_overrides, relaxed_parser=True)
-
+            # JMa: Fix AttributeError: 'NoneType' object has no attribute 'get'
+            #      File "/storage/plzen4-ntis/home/jmatouse/GIT_repos/Coqui-TTS-0.15/TTS/tts/models/vits.py", line 1615, in get_sampler
+            #           multi_dict = config.weighted_sampler_multipliers.get(attr_name, None)
+            # `config.weighted_sampler_multipliers` is expected to be (empty) dict but not None!
+            if config.weighted_sampler_multipliers == None:
+                config.weighted_sampler_multipliers = {}
+        
         # update the config.json fields and copy it to the output folder
         new_fields = {}
         if args.rank == 0:
@@ -1510,7 +1516,6 @@ class Trainer:
             # reduce TB load and don't log every step
             if self.total_steps_done % self.config.plot_step == 0:
                 self.dashboard_logger.train_step_stats(self.total_steps_done, loss_dict)
-            
             # JMa: checkpoint the model if step-based checkpointing is chosen
             if not self.config.use_total_epochs:
                 if self.total_steps_done % self.config.save_step == 0 and self.total_steps_done != 0:
@@ -1699,6 +1704,9 @@ class Trainer:
                 else None
             )
 
+        if len(list(enumerate(self.eval_loader))) < 1:
+            logger.info(" [!] `eval_loader` is empty. Skipping evaluation step.")
+
         torch.set_grad_enabled(False)
         self.model.eval()
         self.c_logger.print_eval_start()
@@ -1712,7 +1720,7 @@ class Trainer:
             self.keep_avg_eval.update_values({"avg_loader_time": loader_time})
             outputs_, _ = self.eval_step(batch, cur_step)
             if outputs_ is None:
-                logger.info(" [!] `eval_step()` retuned `None` outputs. Skipping evaluation step.")
+                logger.info(" [!] `eval_step()` returned `None` outputs. Skipping evaluation step.")
                 continue
             outputs = outputs_
             loader_start_time = time.time()
@@ -1882,9 +1890,10 @@ class Trainer:
                 self.train_epoch()
             if self.config.run_eval:
                 self.eval_epoch()
-                # JMa: comment as eval performance is printed 2x (see below)
-                # self.c_logger.print_epoch_end(self.epochs_done, self.keep_avg_eval.avg_values)
-            
+            # JMa: Run test after `test_epoch_step` epochs
+            if self.epochs_done >= self.config.test_delay_epochs and self.args.rank <= 0 and self.epochs_done % self.config.test_epoch_step == 0:
+                self.test_run()
+
             self.c_logger.print_epoch_end(
                 epoch,
                 self.keep_avg_eval.avg_values if self.config.run_eval else self.keep_avg_train.avg_values,
@@ -1897,6 +1906,10 @@ class Trainer:
             self.callbacks.on_epoch_end(self)
             self.start_with_eval = False
         
+        # JMa: Checkpoint model after all epochs done
+        logger.info(f" > {self.config.epochs} epochs reached at step {self.total_steps_done} => saving the final checkpoint")
+        self.save_checkpoint()
+
         # JMa: Checkpoint model after all epochs done
         logger.info(f" > {self.config.epochs} epochs reached at step {self.total_steps_done} => saving the final checkpoint")
         self.save_checkpoint()
