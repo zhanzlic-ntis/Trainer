@@ -190,6 +190,10 @@ class TrainerConfig(Coqpit):
     use_total_epochs: bool = field(
         default=False, metadata={"help": "Compute the number of epochs done as a total number across continue runs. Defaults to False"}
     )
+    # JMa
+    save_on_epochs: bool = field(
+        default=False, metadata={"help": "Save checkpoints, best models and test files on epochs instead on steps. Defaults to False"}
+    )
     # Fields for distributed training
     distributed_backend: str = field(
         default="nccl", metadata={"help": "Distributed backend to use. Defaults to 'nccl'"}
@@ -1520,7 +1524,7 @@ class Trainer:
             if self.total_steps_done % self.config.plot_step == 0:
                 self.dashboard_logger.train_step_stats(self.total_steps_done, loss_dict)
             # JMa: checkpoint the model if step-based checkpointing is chosen
-            if not self.config.use_total_epochs:
+            if not self.config.save_on_epochs:
                 if self.total_steps_done % self.config.save_step == 0 and self.total_steps_done != 0:
                     if self.config.save_checkpoints:
                         # checkpoint the model
@@ -1604,7 +1608,7 @@ class Trainer:
             if self.config.model_param_stats:
                 self.dashboard_logger.model_weights(self.model, self.total_steps_done)
             # JMa: checkpoint the model if epoch-based checkpointing is chosen
-            if self.config.use_total_epochs:
+            if self.config.save_on_epochs:
                 if self.epochs_done % self.config.save_epoch == 0 and self.epochs_done != 0:
                     if self.config.save_checkpoints:
                         # checkpoint the model
@@ -1812,7 +1816,7 @@ class Trainer:
             else:
                 # `test_run()` doesn't return audios/figures
                 raise RuntimeError("Test output doesn't contain audios and/or figures.")
-            save_index = self.epochs_done if self.config.use_total_epochs else self.total_steps_done
+            save_index = self.epochs_done if self.config.save_on_epochs else self.total_steps_done
             save_audio(audios, self.config.audio.sample_rate, save_index, f"{self.output_path}/test_audios")
             save_figure(figures, save_index, f"{self.output_path}/test_figures")
 
@@ -2051,7 +2055,7 @@ class Trainer:
             keep_after=self.config.save_best_after,
             save_func=self.dashboard_logger.save_model,
             # JMa: add epoch to path if total epochs are used
-            use_epochs_in_path=self.config.use_total_epochs,
+            use_epochs_in_path=self.config.save_on_epochs,
         )
 
     @rank_zero_only
@@ -2072,7 +2076,7 @@ class Trainer:
             save_n_checkpoints=self.config.save_n_checkpoints,
             save_func=self.dashboard_logger.save_model,
             # JMa: add epoch to path if total epochs are used
-            use_epochs_in_path=self.config.use_total_epochs,
+            use_epochs_in_path=self.config.save_on_epochs,
         )
 
     @rank_zero_only
