@@ -1824,6 +1824,12 @@ class Trainer:
             ch = load_fsspec(self.args.restore_path, map_location="cpu")
             if "model_loss" in ch:
                 self.best_loss = ch["model_loss"]
+            # JMa -->
+            # Fix bug coqui-ai/TTS#2880 when restoring training from folder (a VITS model?).
+            # https://github.com/gattilorenz/Trainer/commit/82470312bc40484d3c466879a66b195103501e45
+            if isinstance(self.best_loss, dict) and 'train_loss' in self.best_loss:
+                self.best_loss = self.best_loss['train_loss']
+            # # JMa <--
             logger.info(" > Starting with loaded last best loss %f", self.best_loss)
 
     def test(self, model=None, test_samples=None) -> None:
