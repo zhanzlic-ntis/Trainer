@@ -194,6 +194,10 @@ class TrainerConfig(Coqpit):
     save_on_epochs: bool = field(
         default=False, metadata={"help": "Save checkpoints, best models and test files on epochs instead on steps. Defaults to False"}
     )
+    # JMa
+    use_epoch_in_path: bool = field(
+        default=False, metadata={"help": "Add epochs to path when saving checkpoints, best models and test files. Defaults to False"}
+    )
     # Fields for distributed training
     distributed_backend: str = field(
         default="nccl", metadata={"help": "Distributed backend to use. Defaults to 'nccl'"}
@@ -1816,9 +1820,9 @@ class Trainer:
             else:
                 # `test_run()` doesn't return audios/figures
                 raise RuntimeError("Test output doesn't contain audios and/or figures.")
-            save_index = self.epochs_done if self.config.save_on_epochs else self.total_steps_done
-            save_audio(audios, self.config.audio.sample_rate, save_index, f"{self.output_path}/test_audios")
-            save_figure(figures, save_index, f"{self.output_path}/test_figures")
+            save_label = f"{self.total_steps_done:09}-{self.epochs_done:05}" if self.config.use_epoch_in_path else f"{self.total_steps_done:09}"
+            save_audio(audios, self.config.audio.sample_rate, save_label, f"{self.output_path}/test_audios")
+            save_figure(figures, save_label, f"{self.output_path}/test_figures")
 
     def _restore_best_loss(self):
         """Restore the best loss from the args.best_path if provided else
@@ -2055,7 +2059,7 @@ class Trainer:
             keep_after=self.config.save_best_after,
             save_func=self.dashboard_logger.save_model,
             # JMa: add epoch to path if total epochs are used
-            use_epochs_in_path=self.config.save_on_epochs,
+            use_epoch_in_path=self.config.use_epoch_in_path,
         )
 
     @rank_zero_only
@@ -2076,7 +2080,7 @@ class Trainer:
             save_n_checkpoints=self.config.save_n_checkpoints,
             save_func=self.dashboard_logger.save_model,
             # JMa: add epoch to path if total epochs are used
-            use_epochs_in_path=self.config.save_on_epochs,
+            use_epoch_in_path=self.config.use_epoch_in_path,
         )
 
     @rank_zero_only

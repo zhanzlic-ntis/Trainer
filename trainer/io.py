@@ -148,7 +148,7 @@ def save_checkpoint(
     **kwargs,
 ):
     # JMa: use epoch in path instead of steps if required
-    file_name = f"checkpoint_{epoch}.pth" if kwargs.get("use_epochs_in_path", False) else f"checkpoint_{current_step}.pth"
+    file_name = f"checkpoint_{current_step:09}-{epoch}.pth" if kwargs.get("use_epoch_in_path", False) else f"checkpoint_{current_step:09}.pth"
     checkpoint_path = os.path.join(output_folder, file_name)
 
     logger.info("\n > CHECKPOINT : %s", checkpoint_path)
@@ -184,7 +184,7 @@ def save_best_model(
 ):
     if current_loss < best_loss:
         # JMa: use epoch in path instead of steps if required
-        best_model_name = f"best_model_{epoch}.pth" if kwargs.get("use_epochs_in_path", False) else f"best_model_{current_step}.pth"
+        best_model_name = f"best_model_{current_step:09}-{epoch:05}.pth" if kwargs.get("use_epoch_in_path", False) else f"best_model_{current_step:09}.pth"
         checkpoint_path = os.path.join(out_path, best_model_name)
         logger.info(" > BEST MODEL : %s", checkpoint_path)
         save_model(
@@ -218,7 +218,8 @@ def get_last_checkpoint(path: str) -> Tuple[str, str]:
     """Get latest checkpoint or/and best model in path.
 
     It is based on globbing for `*.pth` and the RegEx
-    `(checkpoint|best_model)_([0-9]+)`.
+    `checkpoint|best_model)_([0-9]+)`, or newly (JMa)
+    `checkpoint|best_model)_([0-9]+)-*([0-9]*)`
 
     Args:
         path: Path to files to be compared.
@@ -245,7 +246,10 @@ def get_last_checkpoint(path: str) -> Tuple[str, str]:
         # pass all the checkpoint files and find
         # the one with the largest model number suffix.
         for file_name in file_names:
-            match = re.search(f"{key}_([0-9]+)", file_name)
+            # JMa
+            # Support for epochs in checkpoint path 
+            # match = re.search(f"{key}_([0-9]+)", file_name)
+            match = re.search(f"{key}_([0-9]+)-*([0-9]*)", file_name)
             if match is not None:
                 model_num = int(match.groups()[0])
                 if last_model_num is None or model_num > last_model_num:
@@ -309,7 +313,9 @@ def sort_checkpoints(output_path: str, checkpoint_prefix: str, use_mtime: bool =
         if use_mtime:
             ordering_and_checkpoint_path.append((os.path.getmtime(path), path))
         else:
-            regex_match = re.match(f".*{checkpoint_prefix}_([0-9]+)", path)
+            # JMa
+            # regex_match = re.match(f".*{checkpoint_prefix}_([0-9]+)", path)
+            regex_match = re.match(f".*{checkpoint_prefix}_([0-9]+)-*([0-9]*)", path)
             if regex_match is not None and regex_match.groups() is not None:
                 ordering_and_checkpoint_path.append((int(regex_match.groups()[0]), path))
 
@@ -319,20 +325,20 @@ def sort_checkpoints(output_path: str, checkpoint_prefix: str, use_mtime: bool =
 
 
 # JMa: Save audio files
-def save_audio(audios: dict, sample_rate: int, index: int, output_dir: str) -> None:
+def save_audio(audios: dict, sample_rate: int, label: str, output_dir: str) -> None:
     os.makedirs(output_dir, exist_ok=True)
     print(f" | > Saving {len(audios)} test audio files at step/epoch {index}")
     for name, wav in audios.items():
         # Prefix audio filename with steps/epochs done
-        output_path = f"{output_dir}/{index:07}_{name}.wav"
+        output_path = f"{output_dir}/{label}_{name}.wav"
         sf.write(output_path, wav, sample_rate)
 
 
 # JMa: Save figure files
-def save_figure(figures: dict, index: int, output_dir: str) -> None:
+def save_figure(figures: dict, label: str, output_dir: str) -> None:
     os.makedirs(output_dir, exist_ok=True)
     print(f" | > Saving {len(figures)} test figures at step/epoch {index}")
     for name, fig in figures.items():
         # Prefix figure filename with steps/epochs done
-        output_path = f"{output_dir}/{index:07}_{name}.png"
+        output_path = f"{output_dir}/{label}_{name}.png"
         fig.savefig(output_path)
