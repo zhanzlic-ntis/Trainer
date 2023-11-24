@@ -148,7 +148,7 @@ def save_checkpoint(
     **kwargs,
 ):
     # JMa: use epoch in path instead of steps if required
-    file_name = f"checkpoint_{current_step:09}-{epoch}.pth" if kwargs.get("use_epoch_in_path", False) else f"checkpoint_{current_step:09}.pth"
+    file_name = f"checkpoint_{current_step}-{epoch}.pth" if kwargs.get("use_epoch_in_path", False) else f"checkpoint_{current_step}.pth"
     checkpoint_path = os.path.join(output_folder, file_name)
 
     logger.info("\n > CHECKPOINT : %s", checkpoint_path)
@@ -184,7 +184,7 @@ def save_best_model(
 ):
     if current_loss < best_loss:
         # JMa: use epoch in path instead of steps if required
-        best_model_name = f"best_model_{current_step:09}-{epoch:05}.pth" if kwargs.get("use_epoch_in_path", False) else f"best_model_{current_step:09}.pth"
+        best_model_name = f"best_model_{current_step}-{epoch}.pth" if kwargs.get("use_epoch_in_path", False) else f"best_model_{current_step}.pth"
         checkpoint_path = os.path.join(out_path, best_model_name)
         logger.info(" > BEST MODEL : %s", checkpoint_path)
         save_model(
@@ -327,7 +327,7 @@ def sort_checkpoints(output_path: str, checkpoint_prefix: str, use_mtime: bool =
 # JMa: Save audio files
 def save_audio(audios: dict, sample_rate: int, label: str, output_dir: str) -> None:
     os.makedirs(output_dir, exist_ok=True)
-    print(f" | > Saving {len(audios)} test audio files at step/epoch {index}")
+    print(f" | > Saving {len(audios)} test audio files at step/epoch {label}")
     for name, wav in audios.items():
         # Prefix audio filename with steps/epochs done
         output_path = f"{output_dir}/{label}_{name}.wav"
@@ -337,7 +337,7 @@ def save_audio(audios: dict, sample_rate: int, label: str, output_dir: str) -> N
 # JMa: Save figure files
 def save_figure(figures: dict, label: str, output_dir: str) -> None:
     os.makedirs(output_dir, exist_ok=True)
-    print(f" | > Saving {len(figures)} test figures at step/epoch {index}")
+    print(f" | > Saving {len(figures)} test figures at step/epoch {label}")
     for name, fig in figures.items():
         # Prefix figure filename with steps/epochs done
         output_path = f"{output_dir}/{label}_{name}.png"
