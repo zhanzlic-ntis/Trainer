@@ -182,7 +182,10 @@ def save_best_model(
     save_func=None,
     **kwargs,
 ):
-    if current_loss < best_loss:
+    use_eval_loss = current_loss["eval_loss"] is not None and best_loss["eval_loss"] is not None
+    if (use_eval_loss and current_loss["eval_loss"] < best_loss["eval_loss"]) or (
+        not use_eval_loss and current_loss["train_loss"] < best_loss["train_loss"]
+    ):
         # JMa: use epoch in path instead of steps if required
         best_model_name = f"best_model_{current_step}-{epoch}.pth" if kwargs.get("use_epoch_in_path", False) else f"best_model_{current_step}.pth"
         checkpoint_path = os.path.join(out_path, best_model_name)
