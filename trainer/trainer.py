@@ -351,6 +351,7 @@ class Trainer:
         parse_command_line_args: bool = True,
         callbacks: Dict[str, Callable] = {},
         gpu: int = None,
+        mk_experiment_folder: bool = True,
     ) -> None:
         """Simple yet powerful 🐸💬 TTS trainer for PyTorch. It can train all the available `tts` and `vocoder` models
         or easily be customized.
@@ -420,6 +421,9 @@ class Trainer:
             gpu (int):
                 GPU ID to use for training If "CUDA_VISIBLE_DEVICES" is not set. Defaults to None.
 
+            mk_experiment_folder (bool):
+                Create an experiment subfolder with a unique name (run-name and time-based). Defaults to True.
+
         Example::
 
             Running trainer with a model.
@@ -455,8 +459,11 @@ class Trainer:
         else:
             # override the output path if it is provided
             output_path = config.output_path if output_path is None else output_path
-            # create a new output folder name
-            output_path = get_experiment_folder_path(config.output_path, config.run_name)
+            
+            # create a new unique output folder name (ZHa: when allowed by mk_experiment_folder)
+            if mk_experiment_folder:
+                output_path = get_experiment_folder_path(output_path, config.run_name)
+            
             os.makedirs(output_path, exist_ok=True)
 
         # copy training assets to the output folder
@@ -776,16 +783,19 @@ class Trainer:
         """
         # set arguments for continuing training
         if args.continue_path:
-            args.config_path = os.path.join(args.continue_path, "config.json")
-            args.restore_path, best_model = get_last_checkpoint(args.continue_path)
-            if not args.best_path:
-                args.best_path = best_model
-            # use the same config
-            if config:
-                config.load_json(args.config_path)
-            else:
-                coqpit = Coqpit()
-                coqpit.load_json(args.config_path)
+            try:
+                args.config_path = os.path.join(args.continue_path, "config.json")
+                args.restore_path, best_model = get_last_checkpoint(args.continue_path)
+                if not args.best_path:
+                    args.best_path = best_model
+                # use the same config
+                if config:
+                    config.load_json(args.config_path)
+                else:
+                    coqpit = Coqpit()
+                    coqpit.load_json(args.config_path)
+            except:
+                logger.info(f"[!] Cannot restore previous model from \"{args.continue_path}\"")
 
         # override config values from command-line args
         # TODO: Maybe it is better to do it outside
@@ -1289,6 +1299,7 @@ class Trainer:
             return outputs, {}, step_time
 
         grad_clip = self._set_grad_clip_per_optimizer(config=config, optimizer_idx=optimizer_idx)
+
         # optimizer step
         grad_norm = 0
         update_lr_scheduler = True
@@ -1624,7 +1635,6 @@ class Trainer:
                     self.update_training_dashboard_logger(batch=batch, outputs=outputs)
         # JMa: Delete outputs at the end of epoch
         del outputs
-
         torch.cuda.empty_cache()
 
     #######################
@@ -1705,10 +1715,10 @@ class Trainer:
 
     def eval_epoch(self) -> None:
         """Main entry point for the evaluation loop. Run evaluation on the all validation samples."""
-
+        
         # initialize it when eval_epoch is called alone.
         self.keep_avg_eval = KeepAverage() if self.keep_avg_eval is None else self.keep_avg_eval
-
+        
         if self.eval_loader is None:
             self.eval_loader = (
                 self.get_eval_dataloader(
@@ -1921,10 +1931,17 @@ class Trainer:
                 epoch,
                 self.keep_avg_eval.avg_values if self.config.run_eval else self.keep_avg_train.avg_values,
             )
+            # JMa: Run test after `test_epoch_step` epochs
+            if self.epochs_done >= self.config.test_delay_epochs and self.args.rank <= 0 and self.epochs_done % self.config.test_epoch_step == 0:
+                self.test_run()
             if self.args.rank in [None, 0]:
                 self.save_best_model()
             self.callbacks.on_epoch_end(self)
             self.start_with_eval = False
+        
+        # JMa: Checkpoint model after all epochs done
+        logger.info(f" > {self.config.epochs} epochs reached at step {self.total_steps_done} => saving the final checkpoint")
+        self.save_checkpoint()
 
         # JMa: Checkpoint model after all epochs done
         logger.info(f" > {self.config.epochs} epochs reached at step {self.total_steps_done} => saving the final checkpoint")
