@@ -1943,10 +1943,6 @@ class Trainer:
         logger.info(f" > {self.config.epochs} epochs reached at step {self.total_steps_done} => saving the final checkpoint")
         self.save_checkpoint()
 
-        # JMa: Checkpoint model after all epochs done
-        logger.info(f" > {self.config.epochs} epochs reached at step {self.total_steps_done} => saving the final checkpoint")
-        self.save_checkpoint()
-
     def fit_with_largest_batch_size(self, starting_batch_size=2048) -> None:
         cuda_meminfo()
         bs = starting_batch_size
