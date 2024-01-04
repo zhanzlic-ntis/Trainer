@@ -60,11 +60,15 @@ def get_commit_hash():
     return commit
 
 
-def get_experiment_folder_path(root_path, model_name):
+#JMa: Enable using just a model name as the output folder, not using any unique string
+def get_experiment_folder_path(root_path, model_name, use_unique_string=True):
     """Get an experiment folder path with the current date and time"""
-    date_str = datetime.datetime.now().strftime("%B-%d-%Y_%I+%M%p")
-    commit_hash = get_commit_hash()
-    output_folder = os.path.join(root_path, model_name + "-" + date_str + "-" + commit_hash)
+    if use_unique_string:
+        date_str = datetime.datetime.now().strftime("%B-%d-%Y_%I+%M%p")
+        commit_hash = get_commit_hash()
+        output_folder = os.path.join(root_path, model_name + "-" + date_str + "-" + commit_hash)
+    else:
+        output_folder = os.path.join(root_path, model_name)
     return output_folder
 
 

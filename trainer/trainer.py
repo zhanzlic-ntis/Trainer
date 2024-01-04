@@ -295,6 +295,11 @@ class TrainerArgs(Coqpit):
             "help": "Best model file to be used for extracting the best loss. If not specified, the latest best model in continue path is used"
         },
     )
+    # JMa
+    use_unique_model_folder: bool = field(
+        default=True,
+        metadata={"help": "Add a unique string (time- and commit-hash-based) to model folder name, otherwise run name from config is used. Defaults to True"}
+    )
     use_ddp: bool = field(
         default=False,
         metadata={"help": "Use DDP in distributed training. It is to set in `distribute.py`. Do not set manually."},
@@ -351,7 +356,6 @@ class Trainer:
         parse_command_line_args: bool = True,
         callbacks: Dict[str, Callable] = {},
         gpu: int = None,
-        mk_experiment_folder: bool = True,
     ) -> None:
         """Simple yet powerful 🐸💬 TTS trainer for PyTorch. It can train all the available `tts` and `vocoder` models
         or easily be customized.
@@ -421,9 +425,6 @@ class Trainer:
             gpu (int):
                 GPU ID to use for training If "CUDA_VISIBLE_DEVICES" is not set. Defaults to None.
 
-            mk_experiment_folder (bool):
-                Create an experiment subfolder with a unique name (run-name and time-based). Defaults to True.
-
         Example::
 
             Running trainer with a model.
@@ -460,9 +461,8 @@ class Trainer:
             # override the output path if it is provided
             output_path = config.output_path if output_path is None else output_path
             
-            # create a new unique output folder name (ZHa: when allowed by mk_experiment_folder)
-            if mk_experiment_folder:
-                output_path = get_experiment_folder_path(output_path, config.run_name)
+            # create a new unique output folder name (JMa: when allowed by `args.use_unique_model_folder`)
+            output_path = get_experiment_folder_path(output_path, config.run_name, args.use_unique_model_folder)
             
             os.makedirs(output_path, exist_ok=True)
 
@@ -1931,9 +1931,6 @@ class Trainer:
                 epoch,
                 self.keep_avg_eval.avg_values if self.config.run_eval else self.keep_avg_train.avg_values,
             )
-            # JMa: Run test after `test_epoch_step` epochs
-            if self.epochs_done >= self.config.test_delay_epochs and self.args.rank <= 0 and self.epochs_done % self.config.test_epoch_step == 0:
-                self.test_run()
             if self.args.rank in [None, 0]:
                 self.save_best_model()
             self.callbacks.on_epoch_end(self)
