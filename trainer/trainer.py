@@ -1821,18 +1821,26 @@ class Trainer:
         # JMa: Save test files
         if self.config.save_test_files:
             # `test_run()` returns dict with "audios"/figures item (e.g. VITS or Tacotron2)
-            if isinstance(test_outputs, dict) and "audios" in test_outputs and "figures" in test_outputs:
-                audios = test_outputs["audios"]
-                figures = test_outputs["figures"]
+            if isinstance(test_outputs, dict):
+                audios = test_outputs.get("audios", False)
+                figures = test_outputs.get("figures", False)
             # `test_run()` returns list with the following items: figures, audios (e.g. GlowTTS)
             elif isinstance(test_outputs, (list, tuple)) and len(test_outputs) == 2:
                 figures, audios = test_outputs[0], test_outputs[1]
             else:
                 # `test_run()` doesn't return audios/figures
                 raise RuntimeError("Test output doesn't contain audios and/or figures.")
+            
+            if not (audios or figures):
+                raise RuntimeError("Test output doesn't contain audios and/or figures.")
+
             save_label = f"{self.total_steps_done:09}-{self.epochs_done:05}" if self.config.use_epoch_in_path else f"{self.total_steps_done:09}"
-            save_audio(audios, self.config.audio.sample_rate, save_label, f"{self.output_path}/test_audios")
-            save_figure(figures, save_label, f"{self.output_path}/test_figures")
+            
+            if audios:
+                save_audio(audios, self.config.audio.sample_rate, save_label, f"{self.output_path}/test_audios")
+            
+            if figures:
+                save_figure(figures, save_label, f"{self.output_path}/test_figures")
 
     def _restore_best_loss(self):
         """Restore the best loss from the args.best_path if provided else
